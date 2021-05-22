@@ -3,32 +3,32 @@ import {
   Query,
   Ctx,
   Arg,
-  Int,
   Mutation,
   InputType,
   Field,
-  ObjectType,
+  ObjectType
 } from "type-graphql";
 import { User } from "../entities/User";
 import { MyContext } from "../types";
 import argon2 from "argon2";
+import { EntityManager } from "@mikro-orm/postgresql";
 
 @InputType()
 class UsernamePasswordInput {
   @Field()
-  username: string;
+  username!: string;
 
   @Field()
-  password: string;
+  password!: string;
 }
 
 @ObjectType()
 class FieldError {
   @Field()
-  field: string;
+  field!: string;
 
   @Field()
-  message: string;
+  message!: string;
 }
 
 @ObjectType()
@@ -44,7 +44,7 @@ class UserResponse {
 export class UserResolver {
   // Get current user
   @Query(() => User, { nullable: true })
-  me(@Ctx() { req, em }: MyContext) {
+  async me(@Ctx() { req, em }: MyContext) {
     // You are not logged in
     if (!req.session.userId) {
       return null;
@@ -53,11 +53,22 @@ export class UserResolver {
     return user;
   }
 
+  // Get all users
+  @Query(() => [User], { nullable: true })
+  async getAllUser(@Ctx() { req, em }: MyContext) {
+    // You are not logged in
+    if (!req.session.userId || !req.session?.username?.includes("duytan")) {
+      return null;
+    }
+    const users = em.find(User, {});
+    return users;
+  }
+
   // Create new user
   @Mutation(() => UserResponse)
   async register(
     @Arg("options") options: UsernamePasswordInput,
-    @Ctx() { em }: MyContext
+    @Ctx() { req, em }: MyContext
   ): Promise<UserResponse> {
     // Simple validation
     if (options.username.length < 2) {
@@ -65,9 +76,9 @@ export class UserResolver {
         errors: [
           {
             field: "username",
-            message: "Username should be longer",
-          },
-        ],
+            message: "Username should be longer than 2 characters"
+          }
+        ]
       };
     }
 
@@ -76,35 +87,47 @@ export class UserResolver {
         errors: [
           {
             field: "password",
-            message: "Password should be longer",
-          },
-        ],
+            message: "Password should be longer than 2 characters"
+          }
+        ]
       };
     }
 
     const hashedPassword = await argon2.hash(options.password);
-    const user = em.create(User, {
-      username: options.username,
-      password: hashedPassword,
-    });
+    let user;
 
     try {
-      await em.persistAndFlush(user);
+      // this insert() won't transform camelCase into snake_case so object key must be snake_case
+      const result = await (em as EntityManager)
+        .createQueryBuilder(User)
+        .getKnexQuery()
+        .insert({
+          username: options.username,
+          password: hashedPassword,
+          created_at: new Date(),
+          updated_at: new Date()
+        })
+        .returning("*");
+
+      user = result[0];
     } catch (err) {
       if (err.constraint.includes("username")) {
         return {
           errors: [
             {
               field: "username",
-              message: "Username is already existed",
-            },
-          ],
+              message: "Username is already existed"
+            }
+          ]
         };
       }
     }
 
+    req.session.userId = user.id;
+    req.session.username = user.username;
+
     return {
-      user,
+      user
     };
   }
 
@@ -120,9 +143,9 @@ export class UserResolver {
         errors: [
           {
             field: "username",
-            message: "Username doesn't exist",
-          },
-        ],
+            message: "Username doesn't exist"
+          }
+        ]
       };
     }
 
@@ -132,17 +155,18 @@ export class UserResolver {
         errors: [
           {
             field: "password",
-            message: "Something's wrong!",
-          },
-        ],
+            message: "Something went wrong!"
+          }
+        ]
       };
     }
 
     // Keep user info on session cookie using Redis
     req.session.userId = user.id;
+    req.session.username = user.username;
 
     return {
-      user,
+      user
     };
   }
 }

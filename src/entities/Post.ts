@@ -16,6 +16,10 @@ export class Post {
   @Property({ type: "date", onUpdate: () => new Date() })
   updatedAt = new Date();
 
+  @Field(() => Int)
+  @Property()
+  ownerId!: number;
+
   @Field()
   @Property()
   title!: string;

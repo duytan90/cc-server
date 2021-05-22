@@ -25,14 +25,22 @@ export class PostResolver {
   }
 
   // Create a new post
-  @Mutation(() => Post)
+  @Mutation(() => Post, { nullable: true })
   async createPost(
     @Arg("title") title: string,
-    @Ctx() { em }: MyContext
-  ): Promise<Post> {
-    const post = em.create(Post, { title });
-    await em.persistAndFlush(post);
-    return post;
+    @Ctx() { req, em }: MyContext
+  ): Promise<Post | null> {
+    if (!req.session.userId) {
+      return null;
+    }
+    try {
+      const post = em.create(Post, { title, ownerId: req.session.userId });
+      await em.persistAndFlush(post);
+      return post;
+    } catch (err) {
+      console.log(`Create new post error: ${err}`);
+      return null;
+    }
   }
 
   // Update a post
@@ -64,6 +72,22 @@ export class PostResolver {
       return true;
     } catch (err) {
       console.error(`Error on deleting post id ${id}: ${err}`);
+      return false;
+    }
+  }
+
+  // Delete all posts
+  @Mutation(() => Boolean)
+  async deleteAllPost(@Ctx() { req, em }: MyContext): Promise<boolean> {
+    try {
+      if (!req.session.userId) {
+        return false;
+      }
+      const posts = await em.find(Post, {ownerId: req.session.userId});
+      await em.removeAndFlush(posts)
+      return true;
+    } catch (err) {
+      console.error(`Error on deleting all posts ${err}`);
       return false;
     }
   }
